@@ -4,17 +4,29 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <cstdio>
-#include "secret.h"
+#include "secret.hpp"
+#include <Wire.h>
+#include <BH1750.h>
 
-const float Ti = 60000;
-const float T = 100;
+
+BH1750 lightMeter;
+
+const int Ti = 60000;
+const int T = 100;
+
+const int Tl = 1000;
+const int wait = Tl/T;
+
+static int waitCount = 0;
+static float lux = 0;
 static float prev = 0;
 
 bool initialized = false;
 
 esp_adc_cal_characteristics_t adcChar;
 
-const char* tmp_html_template = "%s#TYPE hydroponics_water_temp gauge\nhydroponics_water_temp %f\n";
+const char* tmp_temp_template = "%s#TYPE hydroponics_water_temp_celsius gauge\nhydroponics_water_temp_celsius %f\n";
+const char* tmp_lux_template = "%s#TYPE hydroponics_light_lux gauge\nhydroponics_light_lux %f\n";
 
 uint32_t get_voltage_mV(){
     uint32_t voltage;
@@ -46,6 +58,13 @@ float get_temperature(){
 AsyncWebServer server(80);
 
 void setup(){
+
+    Wire.begin();
+    lightMeter.begin();
+    if (!lightMeter.measurementReady()) {
+      delay(100);
+      Serial.println("waiting lightmeter");
+    }
     Serial.begin(115200);
     Serial.print("Connecting to ");
     Serial.println(ssid);
@@ -66,7 +85,8 @@ void setup(){
     server.on("/metrics", HTTP_ANY, [](AsyncWebServerRequest *request){
         char buf[810];
         memset(buf, 0, 810);
-        sprintf(buf, tmp_html_template, "", prev);
+        sprintf(buf, tmp_temp_template, "", prev);
+        sprintf(buf, tmp_lux_template, buf, lux);
         request->send(200, "text/plain", buf);
     });
     server.begin();
@@ -90,5 +110,11 @@ void loop() {
   float temperature = get_temperature();
   float now = prev*Ti/(T+Ti)+temperature*T/(T+Ti);
   prev = now;
+
+  if (waitCount == wait) {
+    lux = lightMeter.readLightLevel();
+    waitCount = 0;
+  }
+  waitCount++;
   delay(T);
 }
